@@ -1,0 +1,60 @@
+# .github/workflows/sync-upstream.yml
+# 作用：自动把本 fork 的 main 分支与上游 ROCm/ATOM 的 main 保持一致
+# 触发方式：① 定时（每天）② 手动点按钮
+
+name: Sync with upstream ROCm/ATOM   # 这个 workflow 在 Actions 页面显示的名字
+
+on:
+  # ① 定时触发：cron 用的是 UTC 时间
+  #    下面 "0 18 * * *" = 每天 UTC 18:00 = 北京时间次日凌晨 02:00
+  #    （北京 = UTC+8，18+8=26 -> 次日 2 点）
+  schedule:
+    - cron: '0 18 * * *'
+  # ② 手动触发：在 GitHub 网页 Actions 页面会出现一个 "Run workflow" 按钮
+  workflow_dispatch:
+
+# 权限：允许这个 workflow 往仓库里 push（否则同步完推不上去）
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    # runner 选择：
+    #   - 测试阶段用 GitHub 免费云端机就够（纯同步不需要 GPU）：
+    runs-on: ubuntu-latest
+    #   - 如果要用你自己的虚拟机/自建 runner，把上面这行改成：
+    #     runs-on: [self-hosted, linux, x64]
+    #     （标签要和你注册 runner 时设置的标签一致）
+
+    steps:
+      # 第 1 步：把本 fork 的代码 checkout 下来
+      - name: Checkout fork
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0          # 拉取完整历史，合并才不会出错
+          # token 默认用 GITHUB_TOKEN（GitHub 自动提供），足够 push 回本 fork
+
+      # 第 2 步：配置 git 身份（提交合并记录时需要）
+      - name: Configure git
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      # 第 3 步：添加上游仓库并拉取它的 main
+      - name: Add upstream and fetch
+        run: |
+          git remote add upstream https://github.com/ROCm/ATOM.git || true
+          git fetch upstream main
+
+      # 第 4 步：把上游 main 合并进本地 main
+      #   --ff-only：只允许"快进式"合并（干净、无冲突时才成功）
+      #   如果上游改动和 fork 有分叉导致合并失败，这一步会报错并停下，
+      #   提醒你需要人工介入处理冲突（这正是我们想要的安全行为）
+      - name: Merge upstream/main into main
+        run: |
+          git checkout main
+          git merge --ff-only upstream/main
+
+      # 第 5 步：把同步好的 main 推回本 fork
+      - name: Push to fork
+        run: git push origin main
